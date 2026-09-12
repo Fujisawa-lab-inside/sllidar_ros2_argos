@@ -78,6 +78,20 @@ install(
 ################################################################################
 # Macro for ament package
 ################################################################################
+if(BUILD_TESTING)
+  find_package(Threads REQUIRED)
+  enable_testing()
+  add_executable(sllidar_diagnostics_test test/test_scan_diagnostics.cpp)
+  target_include_directories(sllidar_diagnostics_test PRIVATE src ${SLLIDAR_SDK_PATH}/include)
+  target_link_libraries(sllidar_diagnostics_test Threads::Threads)
+  add_test(NAME sllidar_scan_diagnostics COMMAND sllidar_diagnostics_test)
+  add_executable(sllidar_decode_evidence_test test/test_decode_error_evidence.cpp ${SLLIDAR_SDK_SRC})
+  target_include_directories(sllidar_decode_evidence_test PRIVATE
+    ${SLLIDAR_SDK_PATH}/include ${SLLIDAR_SDK_PATH}/src)
+  target_link_libraries(sllidar_decode_evidence_test Threads::Threads)
+  add_test(NAME sllidar_decode_error_evidence COMMAND sllidar_decode_evidence_test)
+endif()
+
 ament_export_dependencies(rclcpp)
 ament_export_dependencies(std_msgs)
 ament_export_dependencies(sensor_msgs)

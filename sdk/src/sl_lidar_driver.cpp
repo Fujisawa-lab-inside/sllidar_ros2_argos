@@ -238,10 +238,11 @@ namespace sl {
     class ScanDataHolder
     {
     public:
-        ScanDataHolder(size_t maxcount = 8192) 
+        ScanDataHolder(size_t maxcount = 8192, internal::LidarDiagnosticCounters* diagnostics = nullptr)
             : _scan_node_buffer_size(maxcount)
             , _scan_node_available_id(-1)
             , _new_scan_ready(false)
+            , _diagnostics(diagnostics)
         {
             _scanbuffer[0].reserve(_scan_node_buffer_size);
             _scanbuffer[1].reserve(_scan_node_buffer_size);
@@ -282,6 +283,7 @@ namespace sl {
                     operationalBuf = &_scanbuffer[operationBufID];
 
                     // publish the available scan
+                    if (_diagnostics) _diagnostics->completed(getus());
                     _new_scan_ready = true;
                     _data_waiter.set();
 
@@ -366,6 +368,7 @@ namespace sl {
         size_t _scan_node_buffer_size;
         int    _scan_node_available_id;
         std::atomic<bool>   _new_scan_ready;
+        internal::LidarDiagnosticCounters* _diagnostics;
 
         std::vector<T> _scanbuffer[2];
     };
@@ -399,12 +402,12 @@ namespace sl {
             : _isConnected(false)
             , _isSupportingMotorCtrl(MotorCtrlSupportNone)
             , _op_locker(true)
-            , _scanHolder(MAX_SCANNODE_CACHE_COUNT)
+            , _scanHolder(MAX_SCANNODE_CACHE_COUNT, &_diagnostics)
             , _rawSampleNodeHolder(MAX_SCANNODE_CACHE_COUNT)
             , _waiting_packet_type(0)
         {
             _protocolHandler = std::make_shared< internal::RPLidarProtocolCodec>();
-            _transeiver = std::make_shared< internal::AsyncTransceiver>(*_protocolHandler);
+            _transeiver = std::make_shared< internal::AsyncTransceiver>(*_protocolHandler, &_diagnostics);
             _dataunpacker.reset(internal::LIDARSampleDataUnpacker::CreateInstance(*this));
 
             _protocolHandler->setMessageListener(this);
@@ -1648,6 +1651,18 @@ namespace sl {
             _rawSampleNodeHolder.pushNode(timestamp_uS, node);
         }
 
+        LidarDiagnosticSnapshot getDiagnosticsSnapshot() const override {
+            return _diagnostics.snapshot();
+        }
+
+        void onDecodingError(int errorType, _u8 answerType, const void* payload, size_t size) override {
+            if (errorType == internal::LIDARSampleDataUnpacker::ERR_EVENT_ON_EXP_CHECKSUM_ERR) {
+                _diagnostics.checksumError(answerType, payload, size, getus());
+            } else if (errorType == internal::LIDARSampleDataUnpacker::ERR_EVENT_ON_EXP_ENCODER_RESET) {
+                _diagnostics.encoder_resets.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
         virtual void onHQNodeScanResetReq() {
             _scanHolder.rewindCurrentScanData();
         }
@@ -1685,6 +1700,7 @@ namespace sl {
         rp::hal::Locker           _data_locker;
         rp::hal::Waiter<_u32>     _response_waiter;
 
+        internal::LidarDiagnosticCounters _diagnostics;
         ScanDataHolder<sl_lidar_response_measurement_node_hq_t> _scanHolder;
         RawSampleNodeHolder<sl_lidar_response_measurement_node_hq_t> _rawSampleNodeHolder;
         _u32                          _waiting_packet_type;

@@ -34,6 +34,7 @@
 
 #include <list>
 #include <memory>
+#include "sl_scan_diagnostics.h"
 
 namespace sl { namespace internal {
 
@@ -110,7 +111,7 @@ public:
 	};
 
 
-	AsyncTransceiver(IAsyncProtocolCodec& codec);
+	AsyncTransceiver(IAsyncProtocolCodec& codec, LidarDiagnosticCounters* diagnostics = nullptr);
 	~AsyncTransceiver();
 
 
@@ -138,6 +139,7 @@ protected:
 
 	IChannel* _bindedChannel;
 	IAsyncProtocolCodec& _codec;
+	LidarDiagnosticCounters* _diagnostics;
 
 
 	bool _isWorking;
