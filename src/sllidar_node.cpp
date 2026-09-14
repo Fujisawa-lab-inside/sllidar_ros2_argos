@@ -35,6 +35,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_srvs/srv/empty.hpp>
+#include <chrono>
+#include "scan_diagnostics.h"
 #include "sl_lidar.h"
 #include "math.h"
 
@@ -59,7 +61,7 @@ class SLlidarNode : public rclcpp::Node
     : Node("sllidar_node")
     {
 
-      scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::QoS(rclcpp::KeepLast(10)));
+      scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
       
     }
 
@@ -251,7 +253,16 @@ class SLlidarNode : public rclcpp::Node
             }
         }
 
+        const auto publish_started = SteadyClock::now();
         pub->publish(*scan_msg);
+        const auto published = SteadyClock::now();
+        loop_sample_.publish_ms += elapsed_ms(publish_started, published);
+        loop_sample_.published = true;
+        if (has_published_) {
+            loop_sample_.publish_interval_ms = elapsed_ms(last_published_, published);
+        }
+        last_published_ = published;
+        has_published_ = true;
     }
 public:    
     int work_loop()
@@ -356,13 +367,20 @@ public:
         rclcpp::Time end_scan_time;
         double scan_duration;
         while (rclcpp::ok() && !need_exit) {
+            const auto loop_started = SteadyClock::now();
+            loop_sample_ = argos_lidar::ScanLoopSample{};
             sl_lidar_response_measurement_node_hq_t nodes[8192];
             size_t   count = _countof(nodes);
 
             start_scan_time = this->now();
+            const auto grab_started = SteadyClock::now();
             op_result = drv->grabScanDataHq(nodes, count);
+            const auto grab_finished = SteadyClock::now();
             end_scan_time = this->now();
             scan_duration = (end_scan_time - start_scan_time).seconds();
+            loop_sample_.grab_result = op_result;
+            loop_sample_.timeout = op_result == SL_RESULT_OPERATION_TIMEOUT;
+            loop_sample_.grab_ms = elapsed_ms(grab_started, grab_finished);
 
             if (op_result == SL_RESULT_OK) {
                 op_result = drv->ascendScanData(nodes, count);
@@ -429,7 +447,20 @@ public:
                 }
             }
 
+            const auto spin_started = SteadyClock::now();
+            loop_sample_.prepare_ms = elapsed_ms(grab_finished, spin_started) - loop_sample_.publish_ms;
             rclcpp::spin_some(shared_from_this());
+            const auto loop_finished = SteadyClock::now();
+            loop_sample_.spin_ms = elapsed_ms(spin_started, loop_finished);
+            loop_sample_.loop_ms = elapsed_ms(loop_started, loop_finished);
+            const auto sdk_diagnostics = drv->getDiagnosticsSnapshot();
+            diagnostics_.observe(loop_sample_, sdk_diagnostics);
+            const double steady_sec = std::chrono::duration<double>(
+                loop_finished.time_since_epoch()).count();
+            if (diagnostics_.shouldReport(steady_sec)) {
+                RCLCPP_INFO(this->get_logger(), "scan diagnostics: %s",
+                    diagnostics_.report(steady_sec, this->now().nanoseconds(), sdk_diagnostics).c_str());
+            }
         }
 
         // done!
@@ -442,6 +473,14 @@ public:
 
 
   private:
+    using SteadyClock = std::chrono::steady_clock;
+    static double elapsed_ms(SteadyClock::time_point begin, SteadyClock::time_point end) {
+        return std::chrono::duration<double, std::milli>(end - begin).count();
+    }
+    argos_lidar::ScanLoopDiagnostics diagnostics_;
+    argos_lidar::ScanLoopSample loop_sample_;
+    SteadyClock::time_point last_published_;
+    bool has_published_ = false;
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr start_motor_service;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_motor_service;
@@ -480,4 +519,3 @@ int main(int argc, char * argv[])
   rclcpp::shutdown();
   return ret;
 }
-

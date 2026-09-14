@@ -176,9 +176,10 @@ void ProtocolMessage::_changeBufSize( bool force_compact)
 }
 
 
-AsyncTransceiver::AsyncTransceiver(IAsyncProtocolCodec& codec)
+AsyncTransceiver::AsyncTransceiver(IAsyncProtocolCodec& codec, LidarDiagnosticCounters* diagnostics)
 	: _bindedChannel(NULL)
 	, _codec(codec)
+	, _diagnostics(diagnostics)
 	, _isWorking(false)
     , _workingFlag(0)
 {
@@ -312,9 +313,11 @@ sl_result AsyncTransceiver::_proc_rxThread()
         {
             // timeout is allowed
             if (result == RESULT_OPERATION_TIMEOUT) {
+                if (_diagnostics) _diagnostics->rx_timeouts.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             if (_isWorking) {
+                if (_diagnostics) _diagnostics->rx_errors.fetch_add(1, std::memory_order_relaxed);
                 _workingFlag |= WORKING_FLAG_ERROR;
                 _codec.onChannelError(result);
                 break;
@@ -338,6 +341,7 @@ sl_result AsyncTransceiver::_proc_rxThread()
 #endif
          
         if  (!decodeBuffer->size) {
+            if (_diagnostics) _diagnostics->rx_errors.fetch_add(1, std::memory_order_relaxed);
             delete decodeBuffer;
 
             
@@ -347,6 +351,7 @@ sl_result AsyncTransceiver::_proc_rxThread()
         }
 
         assert(hintedSize >= decodeBuffer->size);
+        if (_diagnostics) _diagnostics->received(decodeBuffer->size, getus());
 
 
 #ifdef _DEBUG_DUMP_PACKET
@@ -360,6 +365,7 @@ sl_result AsyncTransceiver::_proc_rxThread()
 
         _rxLocker.lock();
         _rxQueue.push_back(decodeBuffer);
+        if (_diagnostics) _diagnostics->queueDepth(_rxQueue.size());
         _dataEvt.set();
         _rxLocker.unlock();
 
@@ -394,6 +400,7 @@ sl_result AsyncTransceiver::_proc_decoderThread()
 
         Buffer * bufferToDecode = _rxQueue.front();
         _rxQueue.pop_front();
+        if (_diagnostics) _diagnostics->queueDepth(_rxQueue.size());
 
         _rxLocker.unlock();
 

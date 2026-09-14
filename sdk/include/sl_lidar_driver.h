@@ -52,6 +52,7 @@
 
 
 #include "sl_lidar_cmd.h"
+#include "sl_scan_diagnostics.h"
 
 #include <string>
 
@@ -325,6 +326,10 @@ namespace sl {
         * Check if the connection is established
         */
         virtual bool isConnected() = 0;
+
+        // Optional read-only instrumentation; legacy driver implementations
+        // remain source-compatible and may return an empty snapshot.
+        virtual LidarDiagnosticSnapshot getDiagnosticsSnapshot() const { return {}; }
 
     public:
         enum
