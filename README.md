@@ -23,7 +23,7 @@ cd ~/argos_ws/src
 git clone git@github.com:Fujisawa-lab-inside/sllidar_ros2_argos.git sllidar_ros2
 ```
 
-リモートリポジトリ名は `sllidar_ros2_argos` ですが、ローカルディレクトリ名は `sllidar_ros2` にします。これは ROS 2 package 名 `sllidar_ros2` との整合性を保つためです。
+リモートリポジトリ名は `sllidar_ros2` ですが、ローカルディレクトリ名は `sllidar_ros2` にします。これは ROS 2 package 名 `sllidar_ros2` との整合性を保つためです。
 
 `~/argos_ws` は例です。実際の workspace 名や配置に合わせて読み替えてください。
 
