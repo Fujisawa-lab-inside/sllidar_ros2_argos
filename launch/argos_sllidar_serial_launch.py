@@ -4,6 +4,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -14,6 +15,7 @@ def generate_launch_description():
     inverted = LaunchConfiguration('inverted')
     angle_compensate = LaunchConfiguration('angle_compensate')
     scan_mode = LaunchConfiguration('scan_mode')
+    scan_timing_diagnostics = LaunchConfiguration('scan_timing_diagnostics')
     namespace = LaunchConfiguration('namespace')
 
     return LaunchDescription([
@@ -53,6 +55,11 @@ def generate_launch_description():
             description='Specifying scan mode of lidar'),
 
         DeclareLaunchArgument(
+            'scan_timing_diagnostics',
+            default_value='false',
+            description='Log SDK and ROS timing for each published scan'),
+
+        DeclareLaunchArgument(
             'namespace',
             default_value='',
             description='Specifying namespace for the lidar node'),
@@ -68,6 +75,7 @@ def generate_launch_description():
                          'frame_id': frame_id,
                          'inverted': inverted,
                          'angle_compensate': angle_compensate,
-                         'scan_mode': scan_mode}],
+                         'scan_mode': scan_mode,
+                         'scan_timing_diagnostics': ParameterValue(scan_timing_diagnostics, value_type=bool)}],
             output='screen'),
     ])

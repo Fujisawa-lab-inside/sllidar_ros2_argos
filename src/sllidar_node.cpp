@@ -36,6 +36,8 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <chrono>
+#include <cinttypes>
+#include "arch/linux/timer.h"
 #include "scan_diagnostics.h"
 #include "sl_lidar.h"
 #include "math.h"
@@ -80,6 +82,7 @@ class SLlidarNode : public rclcpp::Node
         this->declare_parameter<bool>("angle_compensate", false);
         this->declare_parameter<std::string>("scan_mode",std::string());
         this->declare_parameter<float>("scan_frequency",10);
+        scan_timing_diagnostics = this->declare_parameter<bool>("scan_timing_diagnostics", false);
         
         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
@@ -256,6 +259,9 @@ class SLlidarNode : public rclcpp::Node
         const auto publish_started = SteadyClock::now();
         pub->publish(*scan_msg);
         const auto published = SteadyClock::now();
+        if (scan_timing_diagnostics) {
+            scan_publish_monotonic_us = rp::arch::rp_getus();
+        }
         loop_sample_.publish_ms += elapsed_ms(publish_started, published);
         loop_sample_.published = true;
         if (has_published_) {
@@ -374,9 +380,14 @@ public:
 
             start_scan_time = this->now();
             const auto grab_started = SteadyClock::now();
-            op_result = drv->grabScanDataHq(nodes, count);
+            sl_u64 sdk_first_ray_us = 0;
+            const std::uint64_t grab_started_us = scan_timing_diagnostics ? rp::arch::rp_getus() : 0;
+            // The plain SDK read delegates to this same operation and drops the timestamp.
+            op_result = scan_timing_diagnostics ? drv->grabScanDataHqWithTimeStamp(nodes, count, sdk_first_ray_us)
+                                                : drv->grabScanDataHq(nodes, count);
             const auto grab_finished = SteadyClock::now();
             end_scan_time = this->now();
+            const std::uint64_t grab_finished_us = scan_timing_diagnostics ? rp::arch::rp_getus() : 0;
             scan_duration = (end_scan_time - start_scan_time).seconds();
             loop_sample_.grab_result = op_result;
             loop_sample_.timeout = op_result == SL_RESULT_OPERATION_TIMEOUT;
@@ -455,6 +466,16 @@ public:
             loop_sample_.loop_ms = elapsed_ms(loop_started, loop_finished);
             const auto sdk_diagnostics = drv->getDiagnosticsSnapshot();
             diagnostics_.observe(loop_sample_, sdk_diagnostics);
+            if (scan_timing_diagnostics && loop_sample_.published) {
+                // Pair by the unchanged /scan header stamp. The SDK first ray is
+                // an estimate in the host monotonic domain, never a ROS stamp.
+                RCLCPP_INFO(this->get_logger(),
+                    "scan timing: scan_stamp_ns=%" PRId64 " sdk_first_ray_monotonic_us=%" PRIu64
+                    " grab_start_monotonic_us=%" PRIu64 " grab_end_monotonic_us=%" PRIu64
+                    " publish_end_monotonic_us=%" PRIu64,
+                    start_scan_time.nanoseconds(), static_cast<std::uint64_t>(sdk_first_ray_us),
+                    grab_started_us, grab_finished_us, scan_publish_monotonic_us);
+            }
             const double steady_sec = std::chrono::duration<double>(
                 loop_finished.time_since_epoch()).count();
             if (diagnostics_.shouldReport(steady_sec)) {
@@ -495,6 +516,8 @@ public:
     std::string frame_id;
     bool inverted = false;
     bool angle_compensate = true;
+    bool scan_timing_diagnostics = false;
+    std::uint64_t scan_publish_monotonic_us = 0;
     float max_distance = 8.0;
     size_t angle_compensate_multiple = 1;//it stand of angle compensate at per 1 degree
     std::string scan_mode;
