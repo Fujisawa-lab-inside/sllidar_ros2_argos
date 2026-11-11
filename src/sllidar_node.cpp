@@ -259,6 +259,7 @@ class SLlidarNode : public rclcpp::Node
         const auto publish_started = SteadyClock::now();
         pub->publish(*scan_msg);
         const auto published = SteadyClock::now();
+        loop_sample_.publish_ros_ns = this->now().nanoseconds();
         if (scan_timing_diagnostics) {
             scan_publish_monotonic_us = rp::arch::rp_getus();
         }
@@ -391,6 +392,8 @@ public:
             scan_duration = (end_scan_time - start_scan_time).seconds();
             loop_sample_.grab_result = op_result;
             loop_sample_.timeout = op_result == SL_RESULT_OPERATION_TIMEOUT;
+            loop_sample_.grab_start_ros_ns = start_scan_time.nanoseconds();
+            loop_sample_.grab_end_ros_ns = end_scan_time.nanoseconds();
             loop_sample_.grab_ms = elapsed_ms(grab_started, grab_finished);
 
             if (op_result == SL_RESULT_OK) {
