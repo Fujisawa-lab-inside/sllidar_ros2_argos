@@ -15,6 +15,9 @@ struct ScanLoopSample {
     std::uint32_t grab_result = 0;
     bool timeout = false;
     bool published = false;
+    std::int64_t grab_start_ros_ns = 0;
+    std::int64_t grab_end_ros_ns = 0;
+    std::int64_t publish_ros_ns = 0;
     double grab_ms = 0.0;
     double prepare_ms = 0.0;
     double publish_ms = 0.0;
@@ -41,10 +44,21 @@ public:
         if (sample.timeout) {
             ++timeouts;
             ++consecutive_timeouts;
+            ++timeouts_since_publication;
         } else {
             consecutive_timeouts = 0;
         }
-        if (sample.published) ++published_scans;
+        if (sample.published) {
+            ++published_scans;
+            last_scan_source_ns = sample.grab_start_ros_ns;
+            last_scan_publish_ros_ns = sample.publish_ros_ns;
+            if (timeouts_since_publication) {
+                recovery_scan_source_ns = last_scan_source_ns;
+                recovery_scan_publish_ros_ns = last_scan_publish_ros_ns;
+                recovery_timeout_count = timeouts_since_publication;
+                timeouts_since_publication = 0;
+            }
+        }
         peak.grab_ms = std::max(peak.grab_ms, sample.grab_ms);
         peak.prepare_ms = std::max(peak.prepare_ms, sample.prepare_ms);
         peak.publish_ms = std::max(peak.publish_ms, sample.publish_ms);
@@ -77,7 +91,14 @@ public:
             << ",\"consecutive_grab_failures\":" << consecutive_failures
             << ",\"consecutive_timeouts\":" << consecutive_timeouts
             << ",\"last_grab_result\":" << latest.grab_result
-            << ",\"last_failure_result\":" << last_failure_result;
+            << ",\"last_failure_result\":" << last_failure_result
+            << ",\"last_grab_start_ros_ns\":\"" << latest.grab_start_ros_ns
+            << "\",\"last_grab_end_ros_ns\":\"" << latest.grab_end_ros_ns
+            << "\",\"last_scan_source_ns\":\"" << last_scan_source_ns
+            << "\",\"last_scan_publish_ros_ns\":\"" << last_scan_publish_ros_ns
+            << "\",\"recovery_first_scan_source_ns\":\"" << recovery_scan_source_ns
+            << "\",\"recovery_first_scan_publish_ros_ns\":\"" << recovery_scan_publish_ros_ns
+            << "\",\"recovery_timeout_count\":" << recovery_timeout_count;
 #define ARGOS_LIDAR_TIMING(field) \
         out << ",\"" #field "\":" << latest.field << ",\"max_" #field "\":" << peak.field
         ARGOS_LIDAR_TIMING(grab_ms);
@@ -150,6 +171,9 @@ private:
     bool abnormal = false, reported = false;
     double last_report_sec = 0.0;
     std::uint64_t last_error_sequence = 0;
+    std::uint64_t timeouts_since_publication = 0, recovery_timeout_count = 0;
+    std::int64_t last_scan_source_ns = 0, last_scan_publish_ros_ns = 0;
+    std::int64_t recovery_scan_source_ns = 0, recovery_scan_publish_ros_ns = 0;
 };
 
 }  // namespace argos_lidar

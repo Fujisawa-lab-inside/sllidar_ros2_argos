@@ -54,6 +54,56 @@ void timeout_then_recovery_retains_failure_evidence() {
             "normal logging period not restored");
 }
 
+void first_scan_after_recorded_timeout_burst_keeps_its_source_and_publish_time() {
+    argos_lidar::ScanLoopDiagnostics diagnostic;
+    sl::LidarDiagnosticSnapshot sdk;
+    argos_lidar::ScanLoopSample sample;
+    sample.published = true;
+    sample.grab_start_ros_ns = 9'880'000'000LL;
+    sample.grab_end_ros_ns = sample.publish_ros_ns = 10'000'000'000LL;
+    diagnostic.observe(sample, sdk);
+    diagnostic.report(10., sample.publish_ros_ns, sdk);
+
+    // 8e912c54 recorded three successive ~2 s SDK timeouts and a 7.147 s
+    // interval between published scans. A timeout carries no scan stamp.
+    for (std::int64_t start : {10'000'000'000LL, 12'000'000'000LL, 14'000'000'000LL}) {
+        argos_lidar::ScanLoopSample timeout;
+        timeout.grab_result = SL_RESULT_OPERATION_TIMEOUT;
+        timeout.timeout = true;
+        timeout.grab_ms = 2000.;
+        timeout.grab_start_ros_ns = start;
+        timeout.grab_end_ros_ns = start + 2'000'000'000LL;
+        diagnostic.observe(timeout, sdk);
+    }
+    const auto outage = diagnostic.report(16., 16'000'000'000LL, sdk);
+    require(outage.find("\"last_grab_end_ros_ns\":\"16000000000\"") != std::string::npos,
+            "failed grab completion time lost");
+    require(outage.find("\"last_scan_source_ns\":\"9880000000\"") != std::string::npos,
+            "failed grab erased last known scan source time");
+
+    sample.grab_start_ros_ns = 16'000'000'000LL;
+    sample.grab_end_ros_ns = 17'140'000'000LL;
+    sample.publish_ros_ns = 17'147'000'000LL;
+    sample.publish_interval_ms = 7147.;
+    diagnostic.observe(sample, sdk);
+    sample.grab_start_ros_ns = 17'150'000'000LL;
+    sample.grab_end_ros_ns = 17'270'000'000LL;
+    sample.publish_ros_ns = 17'271'000'000LL;
+    sample.publish_interval_ms = 124.;
+    diagnostic.observe(sample, sdk);
+    const auto recovered = diagnostic.report(17.3, 17'300'000'000LL, sdk);
+    require(recovered.find("\"max_publish_interval_ms\":7147.000") != std::string::npos,
+            "recorded publication gap lost");
+    require(recovered.find("\"recovery_timeout_count\":3") != std::string::npos,
+            "timeout burst count erased on recovery");
+    require(recovered.find("\"recovery_first_scan_source_ns\":\"16000000000\"") != std::string::npos,
+            "first recovered scan source time lost");
+    require(recovered.find("\"recovery_first_scan_publish_ros_ns\":\"17147000000\"") != std::string::npos,
+            "first recovered scan publish time lost");
+    require(recovered.find("\"last_scan_source_ns\":\"17150000000\"") != std::string::npos,
+            "first recovered scan replaced the latest publication sample");
+}
+
 void slow_publisher_and_sdk_errors_are_distinct_from_grab_failure() {
     argos_lidar::ScanLoopDiagnostics diagnostic;
     sl::LidarDiagnosticSnapshot sdk;
@@ -205,6 +255,7 @@ void concurrent_failure_samples_never_block_or_tear() {
 int main() {
     try {
         timeout_then_recovery_retains_failure_evidence();
+        first_scan_after_recorded_timeout_burst_keeps_its_source_and_publish_time();
         slow_publisher_and_sdk_errors_are_distinct_from_grab_failure();
         concurrent_sdk_counters_do_not_lose_events_or_mutate_on_snapshot();
         bounded_failure_samples_preserve_packet_and_checksum();
